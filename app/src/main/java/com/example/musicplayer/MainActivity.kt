@@ -9,6 +9,7 @@ import android.location.LocationManager
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -23,27 +24,26 @@ data class Song(val id: Long, val title: String, val artist: String, val uri: Ur
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var mediaPlayer: MediaPlayer
-    private var songList = mutableListOf<Song>()
+    private var mediaPlayer: MediaPlayer? = null
+    private val songList = mutableListOf<Song>()
     private var currentSongIndex = -1
     private lateinit var adapter: SongAdapter
     private lateinit var locationManager: LocationManager
     private var currentSpeed = 0f
+    private var locationListener: LocationListener? = null
 
-    // ذخیره Listener برای حذف در onDestroy
-    private lateinit var locationListener: LocationListener
-
-    // Handler برای به‌روزرسانی SeekBar
     private val handler = Handler(Looper.getMainLooper())
     private val updateSeekBarRunnable = object : Runnable {
         override fun run() {
-            if (::mediaPlayer.isInitialized && mediaPlayer.isPlaying) {
-                findViewById<SeekBar>(R.id.seekBar)?.apply {
-                    max = mediaPlayer.duration
-                    progress = mediaPlayer.currentPosition
+            mediaPlayer?.let { mp ->
+                if (mp.isPlaying) {
+                    findViewById<SeekBar>(R.id.seekBar)?.apply {
+                        max = mp.duration
+                        progress = mp.currentPosition
+                    }
                 }
             }
-            handler.postDelayed(this, 500) // هر ۵۰۰ میلی‌ثانیه
+            handler.postDelayed(this, 500)
         }
     }
 
@@ -64,45 +64,24 @@ class MainActivity : AppCompatActivity() {
 
         recyclerView.layoutManager = LinearLayoutManager(this)
         loadSongs()
-        adapter = SongAdapter(songList) { _, index ->
-            playSong(index)
-        }
+        adapter = SongAdapter(songList) { _, index -> playSong(index) }
         recyclerView.adapter = adapter
 
-        // تعریف LocationListener
-        locationListener = object : LocationListener {
-            override fun onLocationChanged(location: Location) {
-                if (location.hasSpeed()) {
-                    currentSpeed = location.speed * 3.6f // m/s → km/h
-                    tvSpeed.text = "سرعت: ${currentSpeed.toInt()} km/h"
-                    adjustVolumeBasedOnSpeed()
-                }
-            }
-            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-            override fun onProviderEnabled(provider: String) {}
-            override fun onProviderDisabled(provider: String) {}
-        }
+        // درخواست مجوزها
+        requestAllPermissions()
 
-        // اگر مجوز لوکیشن قبلاً داده شده باشد، مستقیم راه‌اندازی کن
-        if (checkLocationPermission()) {
+        // راه‌اندازی GPS اگر مجوز موجود باشد
+        if (hasLocationPermission()) {
             startLocationUpdates()
-        } else {
-            // درخواست همه مجوزها (فضای ذخیره‌سازی و لوکیشن)
-            requestPermissions(
-                arrayOf(
-                    Manifest.permission.READ_EXTERNAL_STORAGE,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ), 100
-            )
         }
 
-        // کنترل‌ها
-        btnPlayPause.setOnClickListener {if (::mediaPlayer.isInitialized) {
-                if (mediaPlayer.isPlaying) {
-                    mediaPlayer.pause()
+        btnPlayPause.setOnClickListener {
+            mediaPlayer?.let { mp ->
+                if (mp.isPlaying) {
+                    mp.pause()
                     btnPlayPause.text = "پخش"
                 } else if (currentSongIndex != -1) {
-                    mediaPlayer.start()
+                    mp.start()
                     btnPlayPause.text = "توقف"
                 }
             }
@@ -113,45 +92,44 @@ class MainActivity : AppCompatActivity() {
 
         seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser && ::mediaPlayer.isInitialized) {
-                    mediaPlayer.seekTo(progress)
-                }
+                if (fromUser) mediaPlayer?.seekTo(progress)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        // شروع به‌روزرسانی SeekBar
         handler.post(updateSeekBarRunnable)
     }
 
     private fun loadSongs() {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.TITLE,
-            MediaStore.Audio.Media.ARTIST
+            MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST
         )
-        contentResolver.query(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            "${MediaStore.Audio.Media.IS_MUSIC} != 0",
-            null,
-            null
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
-            val titleCol = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
-            val artistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST)
+        try {
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                "${MediaStore.Audio.Media.IS_MUSIC} != 0",
+                null,
+                null
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
+                val titleCol = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)
+                val artistCol = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST)
 
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idCol)
-                val title = cursor.getString(titleCol) ?: "ناشناس"
-                val artist = cursor.getString(artistCol) ?: "ناشناس"
-                val contentUri: Uri = ContentUris.withAppendedId(
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    id
-                )
-                songList.add(Song(id, title, artist, contentUri))
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val title = cursor.getString(titleCol) ?: "ناشناس"
+                    val artist = cursor.getString(artistCol) ?: "ناشناس"
+                    val contentUri: Uri = ContentUris.withAppendedId(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id
+                    )
+                    songList.add(Song(id, title, artist, contentUri))
+                }
             }
+        } catch (e: Exception) {
+            Toast.makeText(this, "خطا در خواندن فایل‌های صوتی", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -160,16 +138,16 @@ class MainActivity : AppCompatActivity() {
         currentSongIndex = index
         val song = songList[index]
 
-        mediaPlayer.reset()
+        mediaPlayer?.reset()
         try {
-            mediaPlayer.setDataSource(applicationContext, song.uri)
-            mediaPlayer.setOnPreparedListener { mp ->
+            mediaPlayer?.setDataSource(applicationContext, song.uri)
+            mediaPlayer?.setOnPreparedListener { mp ->
                 mp.start()
-                findViewById<SeekBar>(R.id.seekBar).max = mp.duration
-                findViewById<Button>(R.id.btnPlayPause).text = "توقف"
+                findViewById<SeekBar>(R.id.seekBar)?.max = mp.duration
+                findViewById<Button>(R.id.btnPlayPause)?.text = "توقف"
             }
-            mediaPlayer.prepareAsync()
-            findViewById<TextView>(R.id.tvNowPlaying).text = "در حال پخش: ${song.title}"
+            mediaPlayer?.prepareAsync()
+            findViewById<TextView>(R.id.tvNowPlaying)?.text = "در حال پخش: ${song.title}"
         } catch (e: Exception) {
             Toast.makeText(this, "خطا در پخش فایل", Toast.LENGTH_SHORT).show()
         }
@@ -186,7 +164,6 @@ class MainActivity : AppCompatActivity() {
     private fun adjustVolumeBasedOnSpeed() {
         val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        // درصد حجم صدا بر اساس سرعت (0% تا 100%)
         val factor = when {
             currentSpeed < 20 -> 0.4f
             currentSpeed < 40 -> 0.55f
@@ -198,15 +175,51 @@ class MainActivity : AppCompatActivity() {
         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
     }
 
-    private fun checkLocationPermission(): Boolean {
+    private fun requestAllPermissions() {
+        val permissions = mutableListOf<String>()
+
+        // مجوز مناسب برای خواندن موسیقی
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
+            }
+        } else {
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        }
+
+        // مجوز لوکیشن
+        if (!hasLocationPermission()) {
+            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+
+        if (permissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 100)
+        }
+    }
+
+    private fun hasLocationPermission(): Boolean {
         return ActivityCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
     }private fun startLocationUpdates() {
-        if (checkLocationPermission()) {
+        if (hasLocationPermission()) {
+            locationListener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    if (location.hasSpeed()) {
+                        currentSpeed = location.speed * 3.6f // m/s to km/h
+                        findViewById<TextView>(R.id.tvSpeed)?.text = "سرعت: ${currentSpeed.toInt()} km/h"
+                        adjustVolumeBasedOnSpeed()
+                    }
+                }
+                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+            }
             locationManager.requestLocationUpdates(
                 LocationManager.GPS_PROVIDER,
-                2000, 0f, locationListener
+                2000, 0f, locationListener!!
             )
         }
     }
@@ -218,15 +231,24 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 100) {
-            if (grantResults.isNotEmpty() &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED // فضای ذخیره‌سازی (در صورت نیاز)
-            ) {
-                // برای اندروید قدیمی
-            }
-            if (grantResults.size > 1 &&
-                grantResults[1] == PackageManager.PERMISSION_GRANTED // لوکیشن
+            // اگر مجوز لوکیشن گرفته شد، GPS را روشن کن
+            if (permissions.contains(Manifest.permission.ACCESS_FINE_LOCATION) &&
+                grantResults.getOrNull(permissions.indexOf(Manifest.permission.ACCESS_FINE_LOCATION)) == PackageManager.PERMISSION_GRANTED
             ) {
                 startLocationUpdates()
+            }
+            // اگر مجوز رسانه گرفته شد، لیست را دوباره بخوان (اگر خالی بود)
+            if ((Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && permissions.contains(Manifest.permission.READ_MEDIA_AUDIO)) ||
+                (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && permissions.contains(Manifest.permission.READ_EXTERNAL_STORAGE))
+            ) {
+                if (grantResults.getOrNull(permissions.indexOfFirst {
+                        it == Manifest.permission.READ_MEDIA_AUDIO || it == Manifest.permission.READ_EXTERNAL_STORAGE
+                    }) == PackageManager.PERMISSION_GRANTED) {
+                    if (songList.isEmpty()) {
+                        loadSongs()
+                        adapter.notifyDataSetChanged()
+                    }
+                }
             }
         }
     }
@@ -234,16 +256,12 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(updateSeekBarRunnable)
-        if (::locationManager.isInitialized && ::locationListener.isInitialized) {
-            locationManager.removeUpdates(locationListener)
-        }
-        if (::mediaPlayer.isInitialized) {
-            mediaPlayer.release()
-        }
+        locationListener?.let { locationManager.removeUpdates(it) }
+        mediaPlayer?.release()
+        mediaPlayer = null
     }
 }
 
-// آداپتور ساده برای لیست آهنگ‌ها
 class SongAdapter(
     private val songs: List<Song>,
     private val onClick: (Song, Int) -> Unit
