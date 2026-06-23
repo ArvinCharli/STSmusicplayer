@@ -14,6 +14,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -28,9 +29,9 @@ class MainActivity : AppCompatActivity() {
     private val songList = mutableListOf<Song>()
     private var currentSongIndex = -1
     private lateinit var adapter: SongAdapter
-    private lateinit var locationManager: LocationManager
     private var currentSpeed = 0f
     private var locationListener: LocationListener? = null
+    private var locationManager: LocationManager? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val updateSeekBarRunnable = object : Runnable {
@@ -52,7 +53,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         mediaPlayer = MediaPlayer()
-        locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 
         val recyclerView = findViewById<RecyclerView>(R.id.recyclerView)
         val tvSpeed = findViewById<TextView>(R.id.tvSpeed)
@@ -61,18 +61,32 @@ class MainActivity : AppCompatActivity() {
         val btnPlayPause = findViewById<Button>(R.id.btnPlayPause)
         val btnNext = findViewById<Button>(R.id.btnNext)
         val btnPrev = findViewById<Button>(R.id.btnPrev)
+        val tvEmpty = findViewById<TextView>(R.id.tvEmpty) // اضافه‌شده
 
         recyclerView.layoutManager = LinearLayoutManager(this)
         loadSongs()
         adapter = SongAdapter(songList) { _, index -> playSong(index) }
         recyclerView.adapter = adapter
 
-        // درخواست مجوزها
+        // اگر لیست آهنگ خالی است، پیام "خالی" را نشان بده
+        if (songList.isEmpty()) {
+            recyclerView.visibility = View.GONE
+            tvEmpty.visibility = View.VISIBLE
+        } else {
+            recyclerView.visibility = View.VISIBLE
+            tvEmpty.visibility = View.GONE
+        }
+
         requestAllPermissions()
 
-        // راه‌اندازی GPS اگر مجوز موجود باشد
-        if (hasLocationPermission()) {
-            startLocationUpdates()
+        // راه‌اندازی GPS بدون کرش
+        try {
+            locationManager = getSystemService(LOCATION_SERVICE) as? LocationManager
+            if (locationManager != null && hasLocationPermission()) {
+                startLocationUpdates()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "سنسور سرعت فعال نیست", Toast.LENGTH_SHORT).show()
         }
 
         btnPlayPause.setOnClickListener {
@@ -104,7 +118,8 @@ class MainActivity : AppCompatActivity() {
     private fun loadSongs() {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.TITLE,MediaStore.Audio.Media.ARTIST
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST
         )
         try {
             contentResolver.query(
@@ -122,7 +137,7 @@ class MainActivity : AppCompatActivity() {
                     val id = cursor.getLong(idCol)
                     val title = cursor.getString(titleCol) ?: "ناشناس"
                     val artist = cursor.getString(artistCol) ?: "ناشناس"
-                    val contentUri: Uri = ContentUris.withAppendedId(
+                    val contentUri = ContentUris.withAppendedId(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id
                     )
                     songList.add(Song(id, title, artist, contentUri))
@@ -138,8 +153,8 @@ class MainActivity : AppCompatActivity() {
         currentSongIndex = index
         val song = songList[index]
 
-        mediaPlayer?.reset()
         try {
+            mediaPlayer?.reset()
             mediaPlayer?.setDataSource(applicationContext, song.uri)
             mediaPlayer?.setOnPreparedListener { mp ->
                 mp.start()
@@ -162,53 +177,51 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun adjustVolumeBasedOnSpeed() {
-        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        val factor = when {
-            currentSpeed < 20 -> 0.4f
-            currentSpeed < 40 -> 0.55f
-            currentSpeed < 60 -> 0.7f
-            currentSpeed < 80 -> 0.85f
-            else -> 1.0f
+        try {
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val factor = when {
+                currentSpeed < 20 -> 0.4f
+                currentSpeed < 40 -> 0.55f
+                currentSpeed < 60 -> 0.7f
+                currentSpeed < 80 -> 0.85f
+                else -> 1.0f
+            }
+            val targetVolume = (factor * maxVolume).toInt().coerceIn(0, maxVolume)
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+        } catch (e: Exception) {
+            // بی‌صدا عبور کن
         }
-        val targetVolume = (factor * maxVolume).toInt().coerceIn(0, maxVolume)
-        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
     }
 
     private fun requestAllPermissions() {
         val permissions = mutableListOf<String>()
-
-        // مجوز مناسب برای خواندن موسیقی
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED)
                 permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
-            }
         } else {
-            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
                 permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
         }
-
-        // مجوز لوکیشن
-        if (!hasLocationPermission()) {
+        if (!hasLocationPermission())
             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
 
-        if (permissions.isNotEmpty()) {
+        if (permissions.isNotEmpty())
             ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 100)
-        }
     }
 
     private fun hasLocationPermission(): Boolean {
         return ActivityCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
-    }private fun startLocationUpdates() {
-        if (hasLocationPermission()) {
+    }
+
+    private fun startLocationUpdates() {
+        try {
             locationListener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
                     if (location.hasSpeed()) {
-                        currentSpeed = location.speed * 3.6f // m/s to km/h
+                        currentSpeed = location.speed * 3.6f
                         findViewById<TextView>(R.id.tvSpeed)?.text = "سرعت: ${currentSpeed.toInt()} km/h"
                         adjustVolumeBasedOnSpeed()
                     }
@@ -217,37 +230,32 @@ class MainActivity : AppCompatActivity() {
                 override fun onProviderEnabled(provider: String) {}
                 override fun onProviderDisabled(provider: String) {}
             }
-            locationManager.requestLocationUpdates(
+            locationManager?.requestLocationUpdates(
                 LocationManager.GPS_PROVIDER,
                 2000, 0f, locationListener!!
             )
+        } catch (e: Exception) {
+            Toast.makeText(this, "GPS فعال نیست", Toast.LENGTH_SHORT).show()
         }
     }
 
     override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
+        requestCode: Int, permissions: Array<String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 100) {
-            // اگر مجوز لوکیشن گرفته شد، GPS را روشن کن
             if (permissions.contains(Manifest.permission.ACCESS_FINE_LOCATION) &&
                 grantResults.getOrNull(permissions.indexOf(Manifest.permission.ACCESS_FINE_LOCATION)) == PackageManager.PERMISSION_GRANTED
             ) {
                 startLocationUpdates()
             }
-            // اگر مجوز رسانه گرفته شد، لیست را دوباره بخوان (اگر خالی بود)
-            if ((Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && permissions.contains(Manifest.permission.READ_MEDIA_AUDIO)) ||
-                (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && permissions.contains(Manifest.permission.READ_EXTERNAL_STORAGE))
-            ) {
-                if (grantResults.getOrNull(permissions.indexOfFirst {
-                        it == Manifest.permission.READ_MEDIA_AUDIO || it == Manifest.permission.READ_EXTERNAL_STORAGE
-                    }) == PackageManager.PERMISSION_GRANTED) {
-                    if (songList.isEmpty()) {
-                        loadSongs()
-                        adapter.notifyDataSetChanged()
-                    }
+            // بازخوانی لیست اگر مجوز رسانه صادر شد و لیست خالی است
+            if (songList.isEmpty()) {
+                loadSongs()
+                adapter.notifyDataSetChanged()
+                if (songList.isNotEmpty()) {
+                    findViewById<RecyclerView>(R.id.recyclerView).visibility = View.VISIBLE
+                    findViewById<TextView>(R.id.tvEmpty).visibility = View.GONE
                 }
             }
         }
@@ -256,7 +264,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(updateSeekBarRunnable)
-        locationListener?.let { locationManager.removeUpdates(it) }
+        locationListener?.let { locationManager?.removeUpdates(it) }
         mediaPlayer?.release()
         mediaPlayer = null
     }
