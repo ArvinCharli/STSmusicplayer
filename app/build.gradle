@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.example.musicplayer'
-    compileSdk 34
+    compileSdk 33
 
     defaultConfig {
         applicationId "com.example.musicplayer"
         minSdk 23
-        targetSdk 34
+        targetSdk 33
         versionCode 1
         versionName "1.0"
     }
