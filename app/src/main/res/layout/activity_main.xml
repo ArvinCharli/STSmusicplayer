@@ -20,6 +20,17 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
+    <!-- نمایش پیام در صورت خالی بودن لیست -->
+    <TextView
+        android:id="@+id/tvEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="هیچ موزیکی یافت نشد"
+        android:textSize="18sp"
+        android:visibility="gone" />
+
     <!-- Player Controls -->
     <LinearLayout
         android:layout_width="match_parent"
