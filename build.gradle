@@ -7,18 +7,14 @@ buildscript {
     dependencies {
         // نسخه‌ی 8.7.0 کاملاً با Gradle 9.5.1 سازگار است
         classpath 'com.android.tools.build:gradle:8.7.0'
-
-        // اگر از Kotlin استفاده می‌کنید، این خط را هم اضافه کنید (فعلاً غیرفعال/کامنت است)
-        // classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.0"
+        
+        // پلاگین کاتلین (چون در app/build.gradle از kotlin استفاده کردی)
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.0"
     }
 }
 
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
+// ❌ این بلوک allprojects را کامل حذف کن (دیگر نیاز نیست)
+// allprojects { repositories { google() mavenCentral() } }
 
 tasks.register('clean', Delete) {
     delete rootProject.buildDir
