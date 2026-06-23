@@ -1,4 +1,25 @@
-plugins {
-    id 'com.android.application' version '8.1.0' apply false
-    id 'org.jetbrains.kotlin.android' version '1.9.0' apply false
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // نسخه‌ی 8.7.0 کاملاً با Gradle 9.5.1 سازگار است
+        classpath 'com.android.tools.build:gradle:8.7.0'
+
+        // اگر از Kotlin استفاده می‌کنید، این خط را هم اضافه کنید (فعلاً غیرفعال/کامنت است)
+        // classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.0"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.buildDir
 }
